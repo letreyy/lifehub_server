@@ -5,6 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      network: host
     image: lifehub_server:latest
     container_name: lifehub_server
     ports:
