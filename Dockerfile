@@ -1,5 +1,9 @@
 FROM python:3.10-slim
 
+# Use stable and fast mirror for apt-get
+RUN sed -i 's/deb.debian.org/mirror.yandex.ru/g' /etc/apt/sources.list && \
+    sed -i 's/security.debian.org/mirror.yandex.ru/g' /etc/apt/sources.list
+
 # Install system dependencies required by OpenCV and PaddleOCR
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
