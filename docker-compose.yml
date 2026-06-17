@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  lifehub-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lifehub_server:latest
+    container_name: lifehub_server
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_URL=${OLLAMA_URL}
+      - OLLAMA_MODEL=${OLLAMA_MODEL}
+    restart: unless-stopped
