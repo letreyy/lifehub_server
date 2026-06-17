@@ -1,8 +1,14 @@
 FROM python:3.10-slim
 
-# Use stable and fast mirror for apt-get
-RUN sed -i 's/deb.debian.org/mirror.yandex.ru/g' /etc/apt/sources.list && \
-    sed -i 's/security.debian.org/mirror.yandex.ru/g' /etc/apt/sources.list
+# Use stable and fast mirror for apt-get (supports both legacy and DEB822 formats)
+RUN if [ -f /etc/apt/sources.list ]; then \
+        sed -i 's/deb.debian.org/mirror.yandex.ru/g' /etc/apt/sources.list && \
+        sed -i 's/security.debian.org/mirror.yandex.ru/g' /etc/apt/sources.list; \
+    fi && \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i 's/deb.debian.org/mirror.yandex.ru/g' /etc/apt/sources.list.d/debian.sources && \
+        sed -i 's/security.debian.org/mirror.yandex.ru/g' /etc/apt/sources.list.d/debian.sources; \
+    fi
 
 # Install system dependencies required by OpenCV and PaddleOCR
 RUN apt-get update && apt-get install -y --no-install-recommends \
