@@ -35,27 +35,97 @@ def get_receipt_from_proverkacheka(qr_raw: str) -> dict:
         print(f"[ProverkaCheka] Connection error: {e}")
         return None
 
+KEYWORD_MAPPINGS = {
+    "food": [
+        "молоко", "кефир", "сыр", "масло", "творог", "сметана", "йогурт", "сливки", "ряженка", "простокваша",
+        "хлеб", "батон", "булка", "булочка", "лаваш", "сушки", "багет", "чиабатта", "лепешка",
+        "картофель", "картошка", "лук", "зелень", "укроп", "петрушка", "кинза", "салат", "шпинат", "чеснок", "морковь", "свекла", "капуста", "яблоки", "бананы", "апельсин", "лимон", "мандарин", "грейпфрут", "груша", "виноград", "слива", "фрукты", "ягоды", "помидор", "томат", "огурец", "огурцы", "перец", "кабачок", "баклажан", "грибы", "шампиньоны",
+        "вода", "сок", "нектар", "пиво", "вино", "водка", "напиток", "кола", "лимонад", "квас", "чай", "кофе", "какао", "минералка", "минеральн",
+        "яйцо", "яйца", "мясо", "курица", "цыпленок", "колбаса", "сосиски", "ветчина", "рыба", "фарш", "говядина", "свинина", "индейка", "стейк", "шницель", "котлет", "окорок", "грудинка", "карбонад",
+        "сахар", "соль", "мука", "крупа", "рис", "гречка", "макароны", "паста", "вермишель", "спагетти",
+        "шоколад", "конфеты", "печенье", "вафли", "торт", "пирожное", "мороженое", "чипсы", "орехи", "сухарики", "пряники",
+        "майонез", "кетчуп", "соус", "приправа", "уксус", "масло подсолн", "растительное масло", "оливковое масло",
+        "бакалея", "консервы", "пюре", "каша", "хлопья", "мюсли", "джем", "мед", "варенье", "зефир"
+    ],
+    "health": [
+        "таблетки", "лекарство", "сироп", "мазь", "пластырь", "бинт", "витамины", "аспирин", "парацетамол", "анальгин",
+        "аптека", "препарат", "капли", "спрей", "гель для десен", "антисептик", "маска мед", "терафлю", "нурофен", "но-шпа"
+    ],
+    "home": [
+        "мыло", "шампунь", "гель", "порошок", "кондиционер", "салфетки", "паста", "щетка", "бумага", "освежитель",
+        "губка", "тряпка", "средство для", "вешалка", "посуда", "тарелка", "вилка", "ложка", "нож",
+        "лампочка", "батарейка", "клей", "скотч", "порошок стир", "ополаскиватель", "белизна", "доместос", "туалетн", "влажные",
+        "пена для", "бритья", "дезодорант", "ватные", "зубная", "освежитель", "чистки", "мытья"
+    ],
+    "transport": [
+        "билет", "проезд", "метро", "автобус", "трамвай", "электричка", "поезд"
+    ],
+    "fuel": [
+        "бензин", "топливо", "дизель", "аи-95", "аи-92", "дт"
+    ],
+    "other": [
+        "пакет", "мешок", "коробка", "упаковка"
+    ]
+}
+
+CATEGORY_MAP = {
+    "продукты": "food",
+    "еда": "food",
+    "food": "food",
+    "аптека": "health",
+    "здоровье": "health",
+    "медикаменты": "health",
+    "health": "health",
+    "бытовая химия": "home",
+    "дом": "home",
+    "для дома": "home",
+    "home": "home",
+    "транспорт": "transport",
+    "transport": "transport",
+    "топливо": "fuel",
+    "бензин": "fuel",
+    "fuel": "fuel",
+    "другое": "other",
+    "разное": "other",
+    "пакет": "other",
+    "other": "other"
+}
+
+def classify_item_by_keywords(name: str) -> str:
+    name_lower = name.lower()
+    for category, keywords in KEYWORD_MAPPINGS.items():
+        for kw in keywords:
+            if kw in name_lower:
+                return category
+    return "other"
+
+def map_category_key(cat: str) -> str:
+    cat_clean = cat.lower().strip()
+    return CATEGORY_MAP.get(cat_clean, "other")
+
 def normalize_receipt_items(receipt_json: dict) -> dict:
     """
-    Takes the raw receipt JSON from FNS/Proverkacheka and normalizes it using Ollama.
+    Takes the raw receipt JSON from FNS/Proverkacheka, classifies items using fast rules,
+    and falls back to Ollama only for unrecognized items.
     """
     items_raw = receipt_json.get("items", [])
     date_str = receipt_json.get("dateTime", "")
     if "T" in date_str:
         date_str = date_str.split("T")[0]
     elif len(date_str) >= 10:
-        date_str = date_str[:10]  # Take first 10 chars (YYYY-MM-DD)
+        date_str = date_str[:10]
     else:
         date_str = ""
         
-    # FNS totalSum is in kopecks (e.g. 19590 = 195.9)
     total_amount_raw = receipt_json.get("totalSum", 0)
     total_amount = float(total_amount_raw) / 100.0 if isinstance(total_amount_raw, int) else float(total_amount_raw)
     
-    items_formatted = []
+    # Pre-classify items using fast keyword rules
+    classified_items = []
+    unrecognized_items = []
+    
     for item in items_raw:
         name = item.get("name", "")
-        # FNS prices and sums are in kopecks (integers)
         raw_price = item.get("price", 0)
         raw_sum = item.get("sum", 0)
         
@@ -63,64 +133,77 @@ def normalize_receipt_items(receipt_json: dict) -> dict:
         amount = float(raw_sum) / 100.0 if isinstance(raw_sum, int) else float(raw_sum)
         qty = float(item.get("quantity", 1.0))
         
-        items_formatted.append({
+        category = classify_item_by_keywords(name)
+        
+        item_entry = {
             "name": name,
+            "normalized_name": name,
             "price": price,
             "qty": qty,
-            "amount": amount
-        })
-        
-    system_prompt = (
-        "Ты — AI-ассистент для нормализации товаров в чеке. "
-        "Тебе на вход дается список товаров с их оригинальными названиями, ценами и количеством. "
-        "Твоя задача — вернуть строго JSON-объект с нормализованными названиями и категориями для каждого товара, "
-        "а также определить общую категорию чека.\n"
-        "Требования к структуре JSON:\n"
-        "{\n"
-        f'  "date": "{date_str}",\n'
-        f'  "total_amount": {total_amount},\n'
-        '  "category": "продукты" | "транспорт" | "аптека" | "развлечения" | "другое",\n'
-        '  "items": [\n'
-        "    {\n"
-        '      "name": "оригинальное наименование товара",\n'
-        '      "normalized_name": "короткое нормализованное название товара на русском (например, Сыр Российский, Молоко 3.2%, Батон)",\n'
-        '      "price": float,\n'
-        '      "qty": float,\n'
-        '      "amount": float,\n'
-        '      "category": "категория товара (продукты, медикаменты, бытовая химия, алкоголь, табак, одежда, прочее)"\n'
-        "    }\n"
-        "  ]\n"
-        "}\n"
-        "Отвечай строго в формате JSON, без лишнего текста и без markdown-разметки."
-    )
-    
-    user_prompt = f"Список товаров из чека:\n{json.dumps(items_formatted, ensure_ascii=False, indent=2)}"
-    response_text = call_ollama(system_prompt, user_prompt, json_mode=True, timeout=15)
-    
-    try:
-        res_dict = json.loads(response_text)
-        res_dict["date"] = date_str
-        res_dict["total_amount"] = total_amount
-        return res_dict
-    except Exception as e:
-        print(f"Failed to parse Ollama normalization JSON: {e}. Raw: {response_text}")
-        # Return fallback with raw items
-        items_fallback = []
-        for it in items_formatted:
-            items_fallback.append({
-                "name": it["name"],
-                "normalized_name": it["name"],
-                "price": it["price"],
-                "qty": it["qty"],
-                "amount": it["amount"],
-                "category": "другое"
-            })
-        return {
-            "date": date_str,
-            "total_amount": total_amount,
-            "category": "другое",
-            "items": items_fallback
+            "amount": amount,
+            "category": category
         }
+        
+        if category == "other" and not any(pkg in name.lower() for pkg in ["пакет", "мешок", "коробка"]):
+            unrecognized_items.append(item_entry)
+        
+        classified_items.append(item_entry)
+        
+    # If we have unrecognized items and Ollama is available, run Ollama to classify ONLY those
+    if unrecognized_items and OLLAMA_URL:
+        print(f"[ProverkaCheka] Running Ollama fallback on {len(unrecognized_items)} unrecognized items...")
+        
+        system_prompt = (
+            "Ты — AI-ассистент для категоризации товаров. Тебе на вход дается список товаров с их названиями.\n"
+            "Твоя задача — сопоставить каждый товар с одной из категорий: "
+            "\"food\" (еда, продукты, напитки, алкоголь), "
+            "\"health\" (лекарства, витамины, аптека), "
+            "\"home\" (бытовая химия, салфетки, товары для дома), "
+            "\"transport\" (проездные, билеты), "
+            "\"fuel\" (бензин, дизель), "
+            "или \"other\" (все остальное).\n"
+            "Верни строго JSON-список следующего формата (без markdown-разметки):\n"
+            "[\n"
+            "  {\n"
+            '    "name": "оригинальное наименование товара",\n'
+            '    "category": "food" | "health" | "home" | "transport" | "fuel" | "other"\n'
+            "  }\n"
+            "]"
+        )
+        
+        user_prompt = f"Список товаров:\n{json.dumps([{'name': it['name']} for it in unrecognized_items], ensure_ascii=False)}"
+        
+        # We set a tight 10 seconds timeout for this small batch Ollama request
+        response_text = call_ollama(system_prompt, user_prompt, json_mode=True, timeout=10)
+        
+        try:
+            ai_results = json.loads(response_text)
+            if isinstance(ai_results, list):
+                # Map names to categories from AI
+                ai_map = {item.get("name"): map_category_key(item.get("category", "other")) for item in ai_results}
+                
+                # Update unrecognized items with AI categories
+                for item in classified_items:
+                    if item["name"] in ai_map:
+                        item["category"] = ai_map[item["name"]]
+                        print(f"[ProverkaCheka] AI categorized '{item['name']}' as '{item['category']}'")
+        except Exception as e:
+            print(f"[ProverkaCheka] AI categorization failed or timed out: {e}. Keeping fast-rule categories.")
+
+    # Determine general check category by largest sum
+    category_sums = {}
+    for it in classified_items:
+        c = it["category"]
+        category_sums[c] = category_sums.get(c, 0.0) + it["amount"]
+        
+    main_category = max(category_sums, key=category_sums.get) if category_sums else "other"
+    
+    return {
+        "date": date_str,
+        "total_amount": total_amount,
+        "category": main_category,
+        "items": classified_items
+    }
 
 def call_ollama(system_prompt: str, user_prompt: str, json_mode: bool = False, timeout: int = 60):
     url = f"{OLLAMA_URL}/api/generate"
