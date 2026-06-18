@@ -95,7 +95,7 @@ def normalize_receipt_items(receipt_json: dict) -> dict:
     )
     
     user_prompt = f"Список товаров из чека:\n{json.dumps(items_formatted, ensure_ascii=False, indent=2)}"
-    response_text = call_ollama(system_prompt, user_prompt, json_mode=True)
+    response_text = call_ollama(system_prompt, user_prompt, json_mode=True, timeout=15)
     
     try:
         res_dict = json.loads(response_text)
@@ -122,7 +122,7 @@ def normalize_receipt_items(receipt_json: dict) -> dict:
             "items": items_fallback
         }
 
-def call_ollama(system_prompt: str, user_prompt: str, json_mode: bool = False):
+def call_ollama(system_prompt: str, user_prompt: str, json_mode: bool = False, timeout: int = 60):
     url = f"{OLLAMA_URL}/api/generate"
     
     payload = {
@@ -137,7 +137,7 @@ def call_ollama(system_prompt: str, user_prompt: str, json_mode: bool = False):
         payload["format"] = "json"
         
     try:
-        response = requests.post(url, json=payload, timeout=180)
+        response = requests.post(url, json=payload, timeout=timeout)
         response.raise_for_status()
         res_json = response.json()
         return res_json.get("response", "")
@@ -171,7 +171,7 @@ def process_receipt_ocr(ocr_lines):
     )
     
     user_prompt = f"Распознанный текст чека:\n{raw_text}"
-    response_text = call_ollama(system_prompt, user_prompt, json_mode=True)
+    response_text = call_ollama(system_prompt, user_prompt, json_mode=True, timeout=40)
     try:
         return json.loads(response_text)
     except Exception as e:
@@ -206,7 +206,7 @@ def process_lab_results_ocr(ocr_lines):
     )
     
     user_prompt = f"Текст бланка анализов:\n{raw_text}"
-    response_text = call_ollama(system_prompt, user_prompt, json_mode=True)
+    response_text = call_ollama(system_prompt, user_prompt, json_mode=True, timeout=40)
     try:
         return json.loads(response_text)
     except Exception as e:
