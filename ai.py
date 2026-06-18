@@ -4,6 +4,123 @@ import requests
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 MODEL_NAME = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b")
+PROVERKACHEKA_TOKEN = os.environ.get("PROVERKACHEKA_TOKEN", "")
+
+def get_receipt_from_proverkacheka(qr_raw: str) -> dict:
+    if not PROVERKACHEKA_TOKEN:
+        print("[ProverkaCheka] No token configured (PROVERKACHEKA_TOKEN). Skipping.")
+        return None
+        
+    url = "https://proverkacheka.com/api/v1/check/get"
+    data = {
+        "token": PROVERKACHEKA_TOKEN,
+        "qrraw": qr_raw
+    }
+    
+    try:
+        print(f"[ProverkaCheka] Querying FNS for QR code raw: {qr_raw}")
+        res = requests.post(url, data=data, timeout=30)
+        res.raise_for_status()
+        res_json = res.json()
+        
+        code = res_json.get("code")
+        if code == 1:
+            print("[ProverkaCheka] Check data successfully fetched from FNS.")
+            return res_json.get("data", {}).get("json")
+        else:
+            error_msg = res_json.get("data", "Unknown error")
+            print(f"[ProverkaCheka] API error code {code}: {error_msg}")
+            return None
+    except Exception as e:
+        print(f"[ProverkaCheka] Connection error: {e}")
+        return None
+
+def normalize_receipt_items(receipt_json: dict) -> dict:
+    """
+    Takes the raw receipt JSON from FNS/Proverkacheka and normalizes it using Ollama.
+    """
+    items_raw = receipt_json.get("items", [])
+    date_str = receipt_json.get("dateTime", "")
+    if "T" in date_str:
+        date_str = date_str.split("T")[0]
+    elif len(date_str) >= 10:
+        date_str = date_str[:10]  # Take first 10 chars (YYYY-MM-DD)
+    else:
+        date_str = ""
+        
+    # FNS totalSum is in kopecks (e.g. 19590 = 195.9)
+    total_amount_raw = receipt_json.get("totalSum", 0)
+    total_amount = float(total_amount_raw) / 100.0 if isinstance(total_amount_raw, int) else float(total_amount_raw)
+    
+    items_formatted = []
+    for item in items_raw:
+        name = item.get("name", "")
+        # FNS prices and sums are in kopecks (integers)
+        raw_price = item.get("price", 0)
+        raw_sum = item.get("sum", 0)
+        
+        price = float(raw_price) / 100.0 if isinstance(raw_price, int) else float(raw_price)
+        amount = float(raw_sum) / 100.0 if isinstance(raw_sum, int) else float(raw_sum)
+        qty = float(item.get("quantity", 1.0))
+        
+        items_formatted.append({
+            "name": name,
+            "price": price,
+            "qty": qty,
+            "amount": amount
+        })
+        
+    system_prompt = (
+        "Ты — AI-ассистент для нормализации товаров в чеке. "
+        "Тебе на вход дается список товаров с их оригинальными названиями, ценами и количеством. "
+        "Твоя задача — вернуть строго JSON-объект с нормализованными названиями и категориями для каждого товара, "
+        "а также определить общую категорию чека.\n"
+        "Требования к структуре JSON:\n"
+        "{\n"
+        f'  "date": "{date_str}",\n'
+        f'  "total_amount": {total_amount},\n'
+        '  "category": "продукты" | "транспорт" | "аптека" | "развлечения" | "другое",\n'
+        '  "items": [\n'
+        "    {\n"
+        '      "name": "оригинальное наименование товара",\n'
+        '      "normalized_name": "короткое нормализованное название товара на русском (например, Сыр Российский, Молоко 3.2%, Батон)",\n'
+        '      "price": float,\n'
+        '      "qty": float,\n'
+        '      "amount": float,\n'
+        '      "category": "категория товара (продукты, медикаменты, бытовая химия, алкоголь, табак, одежда, прочее)"\n'
+        "    }\n"
+        "  ]\n"
+        "}\n"
+        "Отвечай строго в формате JSON, без лишнего текста и без markdown-разметки."
+    )
+    
+    user_prompt = f"Список товаров из чека:\n{json.dumps(items_formatted, ensure_ascii=False, indent=2)}"
+    response_text = call_ollama(system_prompt, user_prompt, json_mode=True)
+    
+    try:
+        res_dict = json.loads(response_text)
+        res_dict["date"] = date_str
+        res_dict["total_amount"] = total_amount
+        return res_dict
+    except Exception as e:
+        print(f"Failed to parse Ollama normalization JSON: {e}. Raw: {response_text}")
+        # Return fallback with raw items
+        items_fallback = []
+        for it in items_formatted:
+            items_fallback.append({
+                "name": it["name"],
+                "normalized_name": it["name"],
+                "price": it["price"],
+                "qty": it["qty"],
+                "amount": it["amount"],
+                "category": "другое"
+            })
+        return {
+            "date": date_str,
+            "total_amount": total_amount,
+            "category": "другое",
+            "items": items_fallback
+        }
 
 def call_ollama(system_prompt: str, user_prompt: str, json_mode: bool = False):
     url = f"{OLLAMA_URL}/api/generate"

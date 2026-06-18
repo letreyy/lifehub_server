@@ -36,6 +36,24 @@ async def ocr_receipt(file: UploadFile = File(...)):
         tmp_path = tmp.name
         
     try:
+        print("[ocr_receipt] Checking for QR code in the image...")
+        qr_raw = ocr.detect_and_decode_qr(tmp_path)
+        if qr_raw:
+            print(f"[ocr_receipt] QR code found: {qr_raw}")
+            if ai.PROVERKACHEKA_TOKEN:
+                receipt_json = ai.get_receipt_from_proverkacheka(qr_raw)
+                if receipt_json:
+                    print("[ocr_receipt] Normalizing items using Ollama...")
+                    receipt_data = ai.normalize_receipt_items(receipt_json)
+                    print(f"[ocr_receipt] Success. Normalized data: {receipt_data}")
+                    return receipt_data
+                else:
+                    print("[ocr_receipt] Failed to retrieve receipt details from FNS. Falling back to OCR.")
+            else:
+                print("[ocr_receipt] PROVERKACHEKA_TOKEN is not configured. Falling back to OCR.")
+        else:
+            print("[ocr_receipt] No QR code detected in the image.")
+            
         print("[ocr_receipt] Running PaddleOCR...")
         ocr_lines = ocr.extract_text_from_image(tmp_path)
         print(f"[ocr_receipt] PaddleOCR completed. Extracted {len(ocr_lines)} text lines.")
