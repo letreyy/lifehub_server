@@ -20,7 +20,7 @@ def call_ollama(system_prompt: str, user_prompt: str, json_mode: bool = False):
         payload["format"] = "json"
         
     try:
-        response = requests.post(url, json=payload, timeout=60)
+        response = requests.post(url, json=payload, timeout=180)
         response.raise_for_status()
         res_json = response.json()
         return res_json.get("response", "")
