@@ -30,6 +30,8 @@ COPY . .
 # Pre-create directory for PaddleOCR model cache
 RUN mkdir -p /root/.paddleocr
 
+ENV PYTHONUNBUFFERED=1
+
 EXPOSE 8000
 
 ENV OLLAMA_URL=http://host.docker.internal:11434
