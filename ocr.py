@@ -7,39 +7,55 @@ _ocr = None
 
 def detect_and_decode_qr(image_path: str) -> str:
     """
-    Attempts to detect and decode a QR code in the image using OpenCV.
-    Supports grayscale conversion and resizing to improve detection.
+    Attempts to detect and decode a QR code in the image using pyzbar and PIL,
+    falling back to OpenCV QRCodeDetector if pyzbar fails.
     """
     try:
         if not os.path.exists(image_path):
             return ""
+            
+        # 1. Try pyzbar (highly accurate)
+        from pyzbar.pyzbar import decode
+        from PIL import Image
+        
+        print("[QR] Attempting pyzbar QR decode...")
+        with Image.open(image_path) as img:
+            decoded_objects = decode(img)
+            for obj in decoded_objects:
+                if obj.type == 'QRCODE':
+                    data = obj.data.decode('utf-8')
+                    print(f"[QR] Detected QR code using pyzbar: {data}")
+                    return data
+                    
+        # 2. Try OpenCV (fallback)
+        print("[QR] pyzbar found no QR codes. Trying OpenCV fallback...")
         img = cv2.imread(image_path)
         if img is None:
             return ""
         
         detector = cv2.QRCodeDetector()
         
-        # 1. Try direct decoding
+        # Try direct decoding
         val, points, straight_qrcode = detector.detectAndDecode(img)
         if val:
-            print(f"[QR] Detected QR code directly: {val}")
+            print(f"[QR] Detected QR code using OpenCV fallback (direct): {val}")
             return val
             
-        # 2. Try grayscale
+        # Try grayscale
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         val, points, straight_qrcode = detector.detectAndDecode(gray)
         if val:
-            print(f"[QR] Detected QR code after grayscale: {val}")
+            print(f"[QR] Detected QR code using OpenCV fallback (grayscale): {val}")
             return val
             
-        # 3. Try resizing for very large images
+        # Try resizing
         h, w = img.shape[:2]
         if max(h, w) > 1024:
             scale = 1024.0 / max(h, w)
             resized = cv2.resize(img, (int(w * scale), int(h * scale)))
             val, points, straight_qrcode = detector.detectAndDecode(resized)
             if val:
-                print(f"[QR] Detected QR code after resizing: {val}")
+                print(f"[QR] Detected QR code using OpenCV fallback (resized): {val}")
                 return val
     except Exception as e:
         print(f"[QR] Error decoding QR code: {e}")
